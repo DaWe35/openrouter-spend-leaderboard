@@ -35,6 +35,9 @@
   const modelUrl = (slug) => 'https://openrouter.ai/' + slug.split('/').map(encodeURIComponent).join('/');
   const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
+  Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+  Chart.defaults.font.size = 12;
+
   $('updated').textContent = data.updatedAt ? 'Updated ' + new Date(data.updatedAt).toLocaleString() + '.' : '';
 
   // ---------------------------------------------------------------- tooltip
@@ -72,7 +75,7 @@
     const barTotals = labels.map((_, i) => series.reduce((a, s) => a + (s.values[i] || 0), 0));
     function draw() {
       drawLegend();
-      const surface = cssVar('--surface');
+      const surface = cssVar('--bg');
       const pctMode = percent();
       const datasets = series.map((s) => ({
         type: 'bar',
@@ -80,16 +83,10 @@
         data: pctMode ? s.values.map((v, i) => (barTotals[i] > 0 ? (v / barTotals[i]) * 100 : 0)) : s.values,
         backgroundColor: color(s),
         hoverBackgroundColor: color(s),
-        borderColor: surface,
-        borderWidth: { top: 2, bottom: 0, left: 0, right: 0 },
-        borderSkipped: false,
+        borderWidth: 0,
         stack: 'spend',
         order: 2,
       }));
-      // Round only the outer data-end of each bar (the top-most non-zero segment).
-      datasets.forEach((ds, di) => {
-        ds.borderRadius = (ctx) => (datasets.slice(di + 1).every((d) => !d.data[ctx.dataIndex]) ? { topLeft: 4, topRight: 4 } : 0);
-      });
       if (measured) {
         datasets.push({
           type: 'line',
@@ -107,7 +104,6 @@
       }
 
       const textColor = cssVar('--text-2');
-      const grid = cssVar('--grid');
       if (chart) chart.destroy();
       chart = new Chart($(canvasId), {
         data: { labels, datasets },
@@ -116,20 +112,20 @@
           maintainAspectRatio: false,
           animation: false,
           interaction: { mode: 'index', intersect: false },
-          datasets: { bar: { categoryPercentage: 0.86, barPercentage: 0.92 } },
+          datasets: { bar: { categoryPercentage: 0.78, barPercentage: 1 } },
           scales: {
             x: {
               stacked: true,
               grid: { display: false },
-              border: { color: grid },
-              ticks: { color: textColor, maxRotation: 0, autoSkip: true, autoSkipPadding: 16, callback: (v) => short(labels[v]) },
+              border: { display: false },
+              ticks: { color: textColor, maxRotation: 0, autoSkip: true, autoSkipPadding: 40, padding: 8, callback: (v) => short(labels[v]) },
             },
             y: {
               stacked: true,
               max: pctMode ? 100 : undefined,
-              grid: { color: grid },
+              grid: { display: false },
               border: { display: false },
-              ticks: { color: textColor, callback: (v) => (pctMode ? v + '%' : usd(v, 0)), maxTicksLimit: 6 },
+              ticks: { color: textColor, padding: 8, callback: (v) => (pctMode ? v + '%' : usd(v, 0)), maxTicksLimit: 6 },
             },
           },
           plugins: {
@@ -348,7 +344,7 @@
 
   // ---------------------------------------------------------------- leaderboard
 
-  const COLLAPSED = 10;
+  const COLLAPSED = 20;
   const PAGE = 20;
   let period = 'week';
   let shown = COLLAPSED;
@@ -361,9 +357,9 @@
     const v = r.change;
     if (Math.abs(v) < 0.5) return '<span class="chg flat">0%</span>';
     const cls = v > 0 ? 'up' : 'down';
-    const arrow = v > 0 ? '▲' : '▼';
-    const txt = Math.abs(v) >= 1000 ? Math.round(v / 100) / 10 + 'K%' : Math.round(Math.abs(v)) + '%';
-    return `<span class="chg ${cls}">${arrow} ${v > 0 ? '+' : '−'}${txt.replace('-', '')}</span>`;
+    const arrow = v > 0 ? '↑' : '↓';
+    const txt = Math.abs(v) > 999 ? '>999%' : Math.round(Math.abs(v)) + '%';
+    return `<span class="chg ${cls}">${arrow}${txt}</span>`;
   }
 
   function rowTip(r) {
@@ -382,7 +378,7 @@
 
   function drawLeaderboard() {
     const p = data.leaderboard[period];
-    document.querySelectorAll('#tabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.period === period)));
+    $('lb-period').value = period;
     const range = p.start === p.end ? long(p.end) : `${short(p.start)} – ${long(p.end)}`;
     const desc = period === 'trending' ? 'Biggest week-over-week spend growth' : `${usd(p.total)} total across ${p.modelCount} models`;
     $('lb-sub').textContent = `${desc} · ${range} (UTC)`;
@@ -394,15 +390,20 @@
       return;
     }
     const rows = p.rows.slice(0, shown);
+    // Two columns filled top-to-bottom (1–10 left, 11–20 right), like openrouter.ai.
+    list.style.gridTemplateRows = `repeat(${Math.ceil(rows.length / 2)}, auto)`;
     list.innerHTML = rows.map((r, i) => `
       <li data-i="${i}">
         <span class="rank">${r.rank}.</span>
+        <span class="avatar" aria-hidden="true">${esc(String(r.author).charAt(0))}</span>
         <span class="model">
           <a class="name" href="${modelUrl(r.slug)}" target="_blank" rel="noopener">${esc(r.name)}${r.variant !== 'standard' ? `<span class="tag">${esc(r.variant)}</span>` : ''}</a>
-          <span class="by">by ${esc(r.author)}</span>
+          <span class="by">by <span>${esc(r.author)}</span></span>
         </span>
-        <span class="val">${usd(r.usd)}<span class="share">${pct(r.share)}</span></span>
-        ${changeCell(r)}
+        <span class="stats">
+          <span class="val">${usd(r.usd)}<span class="share">${pct(r.share)}</span></span>
+          ${changeCell(r)}
+        </span>
       </li>`).join('');
     list.querySelectorAll('li[data-i]').forEach((li) => {
       const r = rows[Number(li.dataset.i)];
@@ -412,19 +413,17 @@
     $('lb-more').hidden = shown >= p.rows.length;
   }
 
-  $('tabs').addEventListener('click', (e) => {
-    const b = e.target.closest('button[data-period]');
-    if (!b) return;
-    period = b.dataset.period;
+  $('lb-period').addEventListener('change', (e) => {
+    period = e.target.value;
     shown = COLLAPSED;
     try { localStorage.setItem('lb-period', period); } catch { /* ignore */ }
     drawLeaderboard();
   });
-  $('lb-more').addEventListener('click', () => { shown += PAGE * 2; drawLeaderboard(); });
+  $('lb-more').addEventListener('click', () => { shown += PAGE; drawLeaderboard(); });
 
   // ---------------------------------------------------------------- boot
 
   if (!data.leaderboard[period]) period = 'week';
   drawLeaderboard();
-  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => redraw.forEach((f) => f()));
+  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => redraw.forEach((f) => f()));
 })();
