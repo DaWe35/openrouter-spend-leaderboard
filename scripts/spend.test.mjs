@@ -95,3 +95,34 @@ test('tvd and calendar helpers', () => {
   assert.equal(weekStart('2026-11-29'), '2026-11-23'); // Sun → Mon
   assert.deepEqual(dateRange('2026-02-27', '2026-03-01'), ['2026-02-27', '2026-02-28', '2026-03-01']);
 });
+
+// ---------------------------------------------------------------- 1-year estimate
+import { measuredRate, blendedRate, listRate, calibrateOthers, estimateWeeks } from './estimate.mjs';
+
+test('estimate rates', () => {
+  close(measuredRate(100, 1e6), 1e-4);
+  assert.equal(measuredRate(5, 0), null);
+  const g = { outFrac: 0.1, byokShare: 0.5, cacheRate: 0.8 };
+  // 0.5 × (0.9 × $1/M + 0.1 × $10/M) = $0.95/M
+  close(blendedRate({ inPrice: 1 / M, outPrice: 10 / M }, g) * M, 0.95);
+  // input: 0.2 × $5 + 0.8 × $0.5 = $1.4/M → 0.5 × (0.9 × 1.4 + 0.1 × 20) = $1.63/M
+  close(listRate({ prompt: 5 / M, cacheRead: 0.5 / M, completion: 20 / M }, g) * M, 1.63);
+});
+
+test('others calibration and weekly estimate', () => {
+  const rows = [
+    { x: 'w1', ys: { a: 100, Others: 50 } },
+    { x: 'w2', ys: { a: 200, Others: 100 } },
+    { x: 'w3', ys: { a: 10, b: 10, Others: 10 } },
+  ];
+  const rates = new Map([['a', { rate: 1 }]]); // b unknown → 0
+  const actual = new Map([['w1', 200], ['w2', 400]]); // others rate = 2 in both weeks
+  const cal = calibrateOthers(rows, rates, actual);
+  close(cal.rate, 2);
+  assert.equal(cal.weeks.length, 2);
+  close(cal.weeks[0].holdoutErrPct, 0);
+  const est = estimateWeeks(rows, rates, cal.rate);
+  close(est[2].models.a, 10);
+  close(est[2].models.b, 0);
+  close(est[2].others, 20);
+});

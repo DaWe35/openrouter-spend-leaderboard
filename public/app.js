@@ -51,106 +51,211 @@
   }
   const hideTip = () => { tip.hidden = true; };
 
-  // ---------------------------------------------------------------- chart
+  // ---------------------------------------------------------------- charts
 
+  // Series color: a categorical slot (--s1..--s8 / --others), optionally shaded lighter (+) or darker (−).
+  function color(s) {
+    if (s.hex) return s.hex;
+    const base = cssVar(s.colorVar);
+    return s.shade ? mix(base, s.shade > 0 ? '#ffffff' : '#000000', Math.abs(s.shade)) : base;
+  }
+  function mix(hex, to, t) {
+    const a = parseInt(hex.slice(1), 16), b = parseInt(to.slice(1), 16);
+    return '#' + [16, 8, 0].map((sh) => Math.round(((a >> sh) & 255) * (1 - t) + ((b >> sh) & 255) * t).toString(16).padStart(2, '0')).join('');
+  }
+
+  // A stacked-bar spend chart with legend. `measured` (optional) overlays dots.
+  function stackedChart({ canvasId, legendId, labels, series, measured, title, note, legendLimit = Infinity }) {
+    let chart;
+    let legendOpen = false;
+    function draw() {
+      drawLegend();
+      const surface = cssVar('--surface');
+      const datasets = series.map((s) => ({
+        type: 'bar',
+        label: s.name,
+        data: s.values,
+        backgroundColor: color(s),
+        hoverBackgroundColor: color(s),
+        borderColor: surface,
+        borderWidth: { top: 2, bottom: 0, left: 0, right: 0 },
+        borderSkipped: false,
+        stack: 'spend',
+        order: 2,
+      }));
+      // Round only the outer data-end of each bar (the top-most non-zero segment).
+      datasets.forEach((ds, di) => {
+        ds.borderRadius = (ctx) => (datasets.slice(di + 1).every((d) => !d.data[ctx.dataIndex]) ? { topLeft: 4, topRight: 4 } : 0);
+      });
+      if (measured) {
+        datasets.push({
+          type: 'line',
+          label: 'Measured total',
+          data: measured,
+          stack: 'measured',
+          showLine: false,
+          pointRadius: 5,
+          pointHoverRadius: 6,
+          pointBackgroundColor: cssVar('--text'),
+          pointBorderColor: surface,
+          pointBorderWidth: 2,
+          order: 1,
+        });
+      }
+
+      const textColor = cssVar('--text-2');
+      const grid = cssVar('--grid');
+      if (chart) chart.destroy();
+      chart = new Chart($(canvasId), {
+        data: { labels, datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          interaction: { mode: 'index', intersect: false },
+          datasets: { bar: { categoryPercentage: 0.86, barPercentage: 0.92 } },
+          scales: {
+            x: {
+              stacked: true,
+              grid: { display: false },
+              border: { color: grid },
+              ticks: { color: textColor, maxRotation: 0, autoSkip: true, autoSkipPadding: 16, callback: (v) => short(labels[v]) },
+            },
+            y: {
+              stacked: true,
+              grid: { color: grid },
+              border: { display: false },
+              ticks: { color: textColor, callback: (v) => usd(v, 0), maxTicksLimit: 6 },
+            },
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: { enabled: false, external: tooltip },
+          },
+        },
+      });
+    }
+
+    function tooltip({ chart: ch, tooltip: t }) {
+      if (!t.opacity || !t.dataPoints?.length) return hideTip();
+      const i = t.dataPoints[0].dataIndex;
+      const rows = series
+        .map((s) => ({ s, v: s.values[i] }))
+        .filter((r) => r.v > 0)
+        .sort((a, b) => (a.s.key === 'Others') - (b.s.key === 'Others') || b.v - a.v);
+      const total = rows.reduce((a, r) => a + r.v, 0);
+      const kv = (k, v, cls = '') => `<div class="t-row kv ${cls}"><span>${k}</span><span>${v}</span></div>`;
+      let html = `<div class="t-title">${esc(title(i))}</div>` +
+        rows.map(({ s, v }) => `<div class="t-row"><span class="swatch" style="background:${color(s)}"></span><span>${esc(s.name)}</span><span>${usd(v)}</span></div>`).join('') +
+        kv(measured ? 'Estimated total' : 'Total', usd(total), 't-total');
+      if (measured?.[i] != null) {
+        const diff = ((total - measured[i]) / measured[i]) * 100;
+        html += kv('Measured total', usd(measured[i])) + kv('Estimate vs measured', (diff >= 0 ? '+' : '−') + Math.abs(diff).toFixed(1) + '%');
+      }
+      if (note?.(i)) html += `<div class="t-row kv"><span class="muted">${esc(note(i))}</span><span></span></div>`;
+      const rect = ch.canvas.getBoundingClientRect();
+      showTip(html, rect.left + t.caretX, rect.top + t.caretY);
+    }
+    $(canvasId).addEventListener('mouseleave', hideTip);
+
+    function drawLegend() {
+      const grand = series.reduce((a, s) => a + s.total, 0);
+      const named = series.filter((s) => s.key !== 'Others' && s.total > 0).sort((a, b) => b.total - a.total);
+      const others = series.filter((s) => s.key === 'Others');
+      const visible = legendOpen ? named : named.slice(0, legendLimit);
+      const item = (s, i) => {
+        const name = s.key === 'Others'
+          ? `<span class="name" title="${esc(s.author)}">Others</span>`
+          : `<a class="name" href="${modelUrl(s.slug)}" target="_blank" rel="noopener" title="${esc(s.title ?? s.name + ' by ' + s.author)}">${esc(s.name)}</a>`;
+        return `<li><span class="rank">${s.key === 'Others' ? '' : i + 1}</span><span class="swatch" style="background:${color(s)}"></span>${name}<span class="val">${usd(s.total)}<span class="share">${pct(s.total / grand)}</span></span></li>`;
+      };
+      const hidden = named.length - visible.length;
+      $(legendId).innerHTML = visible.map(item).join('') + others.map(item).join('') +
+        (measured ? '<li><span class="rank"></span><span class="dot"></span><span class="name">Measured total (actual spend)</span><span class="val"></span></li>' : '') +
+        (named.length > legendLimit
+          ? `<li class="legend-toggle"><button type="button">${legendOpen ? 'Show fewer' : `Show all ${named.length} models (+${hidden})`}</button></li>`
+          : '');
+      $(legendId).querySelector('.legend-toggle button')?.addEventListener('click', () => { legendOpen = !legendOpen; drawLegend(); });
+    }
+
+    draw();
+    return draw;
+  }
+
+  // ---- Chart 1: measured spend (last ~30 days, grows with history)
   const c = data.chart;
   const weekly = c.granularity === 'week';
-  const unit = weekly ? 'week' : 'day';
-  $('chart-sub').textContent = `Spend per ${unit} by model, ${long(c.labels[0])} – ${long(c.labels.at(-1))} (UTC)`;
+  $('chart-sub').textContent = `Spend per ${weekly ? 'week' : 'day'} by model, ${long(c.labels[0])} – ${long(c.labels.at(-1))} (UTC)`;
   $('chart-total').textContent = usd(c.total);
   $('chart-total-label').textContent = `total over ${c.bucketDays.reduce((a, b) => a + b, 0)} days`;
 
-  const series = [
-    ...c.series.map((s, i) => ({ ...s, colorVar: `--s${i + 1}` })),
-    { key: 'Others', name: 'Others', author: `${Math.max(0, data.leaderboard.month.modelCount - c.series.length)}+ other models`, total: c.others.total, values: c.others.values, colorVar: '--others' },
-  ];
+  // Both charts color like openrouter.ai's Top Models chart: series in order of first appearance
+  // (each bar's top 9, then "Others"), color = palette[index % 20] with "Others" included,
+  // stacked in that order (first = bottom).
+  const OR_PALETTE = ['#0088fe', '#00c49f', '#ffbb28', '#ff8042', '#ff6347', '#4682b4', '#9acd32', '#da70d6', '#40e0d0', '#ff69b4',
+    '#daa520', '#7b68ee', '#f08080', '#6b8e23', '#db7093', '#3cb371', '#bdb76b', '#800080', '#ff4500', '#2e8b57'];
+  // Colors are assigned in OpenRouter's order; then "Others" is moved first so it always
+  // sits at the bottom of every bar.
+  const withColors = (series) => {
+    const colored = series.map((s, i) => ({ ...s, hex: OR_PALETTE[i % OR_PALETTE.length] }));
+    return [...colored.filter((s) => s.key === 'Others'), ...colored.filter((s) => s.key !== 'Others')];
+  };
 
-  let chart;
-  function drawChart() {
-    const surface = cssVar('--surface');
-    const datasets = series.map((s) => ({
-      label: s.name,
-      data: s.values,
-      backgroundColor: cssVar(s.colorVar),
-      hoverBackgroundColor: cssVar(s.colorVar),
-      borderColor: surface,
-      borderWidth: { top: 2, bottom: 0, left: 0, right: 0 },
-      borderSkipped: false,
-      borderRadius: 0,
-      stack: 'spend',
+  const redraw = [];
+  redraw.push(stackedChart({
+    canvasId: 'chart',
+    legendId: 'legend',
+    labels: c.labels,
+    series: withColors(c.series),
+    legendLimit: 15,
+    title: (i) => {
+      const label = c.labels[i];
+      const days = c.bucketDays[i];
+      return weekly
+        ? `Week of ${long(label)}${days < 7 ? ` (${days} day${days > 1 ? 's' : ''})` : ''}`
+        : fmtDate(label, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+    },
+  }));
+
+  // ---- Chart 2: 1-year estimate from OpenRouter's weekly token chart
+  const e = data.estimate;
+  if (e) {
+    const sourceLabel = { measured: 'last 30 days measured $/token', effective: '1-year effective price', list: 'list price', free: 'free', unpriced: 'no price data', calibrated: 'calibrated on measured weeks' };
+    const estSeries = withColors(e.series).map((s) => ({
+      ...s,
+      title: `${s.name}${s.key === 'Others' ? '' : ' by ' + s.author} · priced at $${s.ratePerM.toFixed(3)}/M tokens (${sourceLabel[s.rateSource] ?? s.rateSource})`,
     }));
-    // Round only the outer data-end of each bar (the top-most non-zero segment).
-    datasets.forEach((ds, di) => {
-      ds.borderRadius = (ctx) => {
-        const i = ctx.dataIndex;
-        const isTop = datasets.slice(di + 1).every((d) => !d.data[i]);
-        return isTop ? { topLeft: 4, topRight: 4 } : 0;
-      };
-    });
+    const fullWeeks = e.partial.filter((p) => !p).length;
+    $('est-sub').textContent = `Estimated spend per week by model, ${long(e.labels[0])} – ${long(e.labels.at(-1))}. Dots mark weeks with measured spend.`;
+    $('est-total').textContent = usd(e.total);
+    $('est-total-label').textContent = `estimated over ${fullWeeks} weeks${e.partial.some(Boolean) ? ' + current week' : ''}`;
 
-    const textColor = cssVar('--text-2');
-    const grid = cssVar('--grid');
-    if (chart) chart.destroy();
-    chart = new Chart($('chart'), {
-      type: 'bar',
-      data: { labels: c.labels, datasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: false,
-        interaction: { mode: 'index', intersect: false },
-        datasets: { bar: { categoryPercentage: 0.86, barPercentage: 0.92 } },
-        scales: {
-          x: {
-            stacked: true,
-            grid: { display: false },
-            border: { color: grid },
-            ticks: { color: textColor, maxRotation: 0, autoSkip: true, autoSkipPadding: 16, callback: (v) => short(c.labels[v]) },
-          },
-          y: {
-            stacked: true,
-            grid: { color: grid },
-            border: { display: false },
-            ticks: { color: textColor, callback: (v) => usd(v, 0), maxTicksLimit: 6 },
-          },
-        },
-        plugins: {
-          legend: { display: false },
-          tooltip: { enabled: false, external: chartTooltip },
-        },
-      },
-    });
+    const errs = e.calibration.map((w) => w.holdoutErrPct).filter((x) => x != null);
+    const errRange = errs.length ? ` (leave-one-out error ${fmtSigned(Math.min(...errs))}% to ${fmtSigned(Math.max(...errs))}%)` : '';
+    const s = e.rateSources;
+    $('est-method').textContent =
+      `How this is estimated: OpenRouter publishes a year of weekly token totals for each week's top 9 models plus "Others" (BYOK included). ` +
+      `Each named model's tokens are multiplied by its own $/token: ${s.measured ?? 0} of ${e.namedModels} use their measured spend ÷ tokens over the last 30 days ` +
+      `(this captures each model's cache use, input/output mix and BYOK share)` +
+      (s.effective ? `, ${s.effective} use OpenRouter's 1-year effective price` : '') +
+      (s.list ? `, ${s.list} use list prices` : '') +
+      `, ${s.free ?? 0} are free variants and ${s.unpriced ?? 0} have no price data (mostly free stealth/preview models), counted as $0. ` +
+      `"Others" tokens are priced at $${e.othersRatePerM.toFixed(3)}/M, calibrated on ${e.calibration.length} week(s) with measured spend${errRange}. ` +
+      `Older weeks are less certain: prices, cache use and the model mix change over time, and today's rates are applied to the whole year.`;
+
+    redraw.push(stackedChart({
+      canvasId: 'est-chart',
+      legendId: 'est-legend',
+      labels: e.labels,
+      series: estSeries,
+      legendLimit: 15,
+      measured: e.measured.some((m) => m != null) ? e.measured : null,
+      title: (i) => `Week of ${long(e.labels[i])}${e.partial[i] ? ' (in progress)' : ''}`,
+      note: (i) => (e.partial[i] ? 'Partial week, includes today' : null),
+    }));
   }
 
-  function chartTooltip({ chart: ch, tooltip: t }) {
-    if (!t.opacity || !t.dataPoints?.length) return hideTip();
-    const i = t.dataPoints[0].dataIndex;
-    const label = c.labels[i];
-    const days = c.bucketDays[i];
-    const title = weekly
-      ? `Week of ${long(label)}${days < 7 ? ` (${days} day${days > 1 ? 's' : ''})` : ''}`
-      : fmtDate(label, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
-    const rows = series
-      .map((s) => ({ s, v: s.values[i] }))
-      .filter((r) => r.v > 0)
-      .sort((a, b) => (a.s.key === 'Others') - (b.s.key === 'Others') || b.v - a.v);
-    const total = rows.reduce((a, r) => a + r.v, 0);
-    const html = `<div class="t-title">${esc(title)}</div>` +
-      rows.map(({ s, v }) => `<div class="t-row"><span class="swatch" style="background:var(${s.colorVar})"></span><span>${esc(s.name)}</span><span>${usd(v)}</span></div>`).join('') +
-      `<div class="t-row kv t-total"><span>Total</span><span>${usd(total)}</span></div>`;
-    const rect = ch.canvas.getBoundingClientRect();
-    showTip(html, rect.left + t.caretX, rect.top + t.caretY);
-  }
-  $('chart').addEventListener('mouseleave', hideTip);
-
-  function drawLegend() {
-    $('legend').innerHTML = series.map((s, i) => {
-      const name = s.key === 'Others'
-        ? `<span class="name" title="${esc(s.author)}">Others</span>`
-        : `<a class="name" href="${modelUrl(s.slug)}" target="_blank" rel="noopener" title="${esc(s.name)} by ${esc(s.author)}">${esc(s.name)}</a>`;
-      return `<li><span class="rank">${s.key === 'Others' ? '' : i + 1}</span><span class="swatch" style="background:var(${s.colorVar})"></span>${name}<span class="val">${usd(s.total)}<span class="share">${pct(s.total / c.total)}</span></span></li>`;
-    }).join('');
-  }
+  function fmtSigned(x) { return (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(1); }
 
   // ---------------------------------------------------------------- leaderboard
 
@@ -230,8 +335,6 @@
   // ---------------------------------------------------------------- boot
 
   if (!data.leaderboard[period]) period = 'week';
-  drawChart();
-  drawLegend();
   drawLeaderboard();
-  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawChart);
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => redraw.forEach((f) => f()));
 })();

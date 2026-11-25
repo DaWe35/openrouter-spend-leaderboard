@@ -55,6 +55,23 @@ Each fetch checks itself against OpenRouter's own internal spend *share* per mod
 no dollar amounts). It prints the total-variation distance between those shares and ours; 0 means
 identical. Expect about 0.03–0.05.
 
+### 1-year estimate (second chart)
+
+OpenRouter only publishes a year of **weekly token totals** for each week's top 9 models by
+tokens, plus "Others". These totals include BYOK. The estimate turns them into dollars:
+
+- **Named models:** tokens × that model's own $/token. Where the model was used in the last
+  30 days, the rate is its measured spend ÷ its tokens, which captures its cache use,
+  input/output mix and BYOK share. Retired models use OpenRouter's 1-year effective price, or
+  list prices. Free and unpriced models count as $0.
+- **"Others":** tokens × one $/token rate, calibrated on the weeks where we have measured spend.
+  The fetch log prints a leave-one-out error for each of those weeks; currently it is about ±8%.
+- **Measured weekly totals** are drawn as dots on the chart for comparison.
+
+Older weeks are rough. Today's rates are applied to the whole year, and when an expensive model
+falls out of a week's top 9 by tokens, its tokens are priced at the average "Others" rate. That
+is why most of the estimate sits in "Others".
+
 ### Data sources
 
 These are the public, unauthenticated endpoints that openrouter.ai's own frontend uses, all under
@@ -66,6 +83,7 @@ These are the public, unauthenticated endpoints that openrouter.ai's own fronten
 | `/stats/model-activity?permaslug=&variant=` | Daily prompt, completion, cached and BYOK tokens (31 days) |
 | `/stats/effective-pricing?permaslug=&variant=&range=1m` | Measured $/M input and output, cache-hit rate |
 | `/catalog/catalog/models` | Names, authors, list prices (fallback) |
+| `/stats/rankings/model-rankings-chart` | Weekly token totals for each week's top 9 models + Others, 1 year (estimate) |
 | `/stats/rankings/models?view=month&metric=spend` | OpenRouter's spend shares (sanity check only) |
 
 ## Caveats
