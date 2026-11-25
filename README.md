@@ -12,9 +12,13 @@ open public/index.html # or xdg-open; works straight from file://, no server nee
 npm test               # unit tests for the spend math
 ```
 
-To serve it instead, run `docker compose up -d`. That starts a busybox `httpd` container serving
-`public/` at http://localhost:8080. Re-run `npm run fetch` on the host and reload the page to see
-new data.
+Or run everything in Docker with `docker compose up -d`. This starts two containers:
+
+- `web`: a busybox `httpd` serving `public/` at http://localhost:8080.
+- `fetcher`: Node, which runs the fetch on startup and then daily at 03:00 UTC (set
+  `FETCH_HOUR_UTC` in the compose file to change the hour). It writes `data/` and `public/`
+  as UID/GID 1000 by default; set `FETCH_UID` and `FETCH_GID` if your user differs. Logs:
+  `docker compose logs -f fetcher`.
 
 `npm run fetch -- --limit 40` fetches only the 40 largest models, for a quick dev run. It does not save history.
 
@@ -24,6 +28,8 @@ OpenRouter publishes about 30 days of per-model daily data. Each run merges the 
 `data/history.json` and keeps the older ones, so running the fetch daily grows the chart towards a
 full year. Once there are more than about 10 weeks of history, the chart switches from daily to
 weekly bars.
+
+The `fetcher` container does this for you. Without Docker, use cron:
 
 ```cron
 0 3 * * * cd /path/to/openrouter-spend-leaderboard && npm run fetch >> fetch.log 2>&1

@@ -1,11 +1,27 @@
 services:
   web:
     image: busybox:1.37
-    # Static file server for public/. Refresh data with `npm run fetch` on the host;
-    # the folder is mounted, so new data shows up on page reload.
+    # Static file server for public/. The fetcher (or `npm run fetch` on the host)
+    # writes new data there; it shows up on page reload.
     command: httpd -f -v -p 8080 -h /www
     ports:
       - "8080:8080"
     volumes:
       - ./public:/www:ro
+    restart: unless-stopped
+
+  fetcher:
+    image: node:22-alpine
+    # Fetches usage + prices on startup, then daily at FETCH_HOUR_UTC.
+    # Updates data/history.json (accumulated history) and public/data.js.
+    command: sh scripts/run-daily.sh
+    working_dir: /app
+    user: "${FETCH_UID:-1000}:${FETCH_GID:-1000}" # write files as your host user
+    environment:
+      FETCH_HOUR_UTC: "3"
+    volumes:
+      - ./package.json:/app/package.json:ro
+      - ./scripts:/app/scripts:ro
+      - ./data:/app/data
+      - ./public:/app/public
     restart: unless-stopped

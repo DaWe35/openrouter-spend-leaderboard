@@ -16,32 +16,34 @@
     <section id="top-models" class="card">
       <div class="section-head">
         <div>
-          <h2>Top Models</h2>
+          <h2>Top Models <span class="badge" id="est-badge" hidden>estimate</span></h2>
           <p class="muted" id="chart-sub"></p>
+          <p class="muted" id="est-sub" hidden></p>
         </div>
-        <div class="hero">
-          <div class="hero-value" id="chart-total"></div>
-          <div class="muted small" id="chart-total-label"></div>
-        </div>
-      </div>
-      <div class="chart-wrap"><canvas id="chart" aria-label="Stacked bar chart of spend by model" role="img"></canvas></div>
-      <ol class="legend" id="legend"></ol>
-    </section>
-
-    <section id="top-models-year" class="card">
-      <div class="section-head">
-        <div>
-          <h2>Top Models <span class="badge">1-year estimate</span></h2>
-          <p class="muted" id="est-sub"></p>
-        </div>
-        <div class="hero">
-          <div class="hero-value" id="est-total"></div>
-          <div class="muted small" id="est-total-label"></div>
+        <div class="head-right">
+          <div class="tabs" role="tablist" id="range-tabs" aria-label="Time range">
+            <button role="tab" data-view="30d">30 days</button>
+            <button role="tab" data-view="1y" id="range-1y">1 year (estimate)</button>
+          </div>
+          <div class="hero" id="chart-hero">
+            <div class="hero-value" id="chart-total"></div>
+            <div class="muted small" id="chart-total-label"></div>
+          </div>
+          <div class="hero" id="est-hero" hidden>
+            <div class="hero-value" id="est-total"></div>
+            <div class="muted small" id="est-total-label"></div>
+          </div>
         </div>
       </div>
-      <div class="chart-wrap"><canvas id="est-chart" aria-label="Estimated weekly spend by model over one year" role="img"></canvas></div>
-      <ol class="legend" id="est-legend"></ol>
-      <p class="muted small method" id="est-method"></p>
+      <div id="view-30d">
+        <div class="chart-wrap"><canvas id="chart" aria-label="Stacked bar chart of spend by model" role="img"></canvas></div>
+        <ol class="legend" id="legend"></ol>
+      </div>
+      <div id="view-1y" hidden>
+        <div class="chart-wrap"><canvas id="est-chart" aria-label="Estimated weekly spend by model over one year" role="img"></canvas></div>
+        <ol class="legend" id="est-legend"></ol>
+        <p class="muted small method" id="est-method"></p>
+      </div>
     </section>
 
     <section id="leaderboard" class="card">

@@ -250,7 +250,7 @@
       title: `${s.name}${s.key === 'Others' ? '' : ' by ' + s.author} · priced at $${s.ratePerM.toFixed(3)}/M tokens (${sourceLabel[s.rateSource] ?? s.rateSource})`,
     }));
     const fullWeeks = e.partial.filter((p) => !p).length;
-    $('est-sub').textContent = `Estimated spend per week by model, ${long(e.labels[0])} – ${long(e.labels.at(-1))}. Dots mark weeks with measured spend.`;
+    $('est-sub').textContent = `Rough estimate of spend per week, ${long(e.labels[0])} – ${long(e.labels.at(-1))}. Dots mark weeks with measured spend. Method below the chart.`;
     $('est-total').textContent = usd(e.total);
     $('est-total-label').textContent = `estimated over ${fullWeeks} weeks${e.partial.some(Boolean) ? ' + current week' : ''}`;
 
@@ -267,16 +267,43 @@
       `"Others" tokens are priced at $${e.othersRatePerM.toFixed(3)}/M, calibrated on ${e.calibration.length} week(s) with measured spend${errRange}. ` +
       `Older weeks are less certain: prices, cache use and the model mix change over time, and today's rates are applied to the whole year.`;
 
-    redraw.push(stackedChart({
-      canvasId: 'est-chart',
-      legendId: 'est-legend',
-      labels: e.labels,
-      series: estSeries,
-      legendLimit: 20,
-      measured: e.measured.some((m) => m != null) ? e.measured : null,
-      title: (i) => `Week of ${long(e.labels[i])}${e.partial[i] ? ' (in progress)' : ''}`,
-      note: (i) => (e.partial[i] ? 'Partial week, includes today' : null),
-    }));
+    // "30 days | 1 year (est.)" switch. The estimate chart is only built the first time it's shown.
+    let built = false;
+    const setView = (view) => {
+      const year = view === '1y';
+      $('view-30d').hidden = year;
+      $('view-1y').hidden = !year;
+      $('chart-hero').hidden = year;
+      $('est-hero').hidden = !year;
+      $('chart-sub').hidden = year;
+      $('est-sub').hidden = !year;
+      $('est-badge').hidden = !year;
+      document.querySelectorAll('#range-tabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.view === view)));
+      if (year && !built) {
+        built = true;
+        redraw.push(stackedChart({
+          canvasId: 'est-chart',
+          legendId: 'est-legend',
+          labels: e.labels,
+          series: estSeries,
+          legendLimit: 20,
+          measured: e.measured.some((m) => m != null) ? e.measured : null,
+          title: (i) => `Week of ${long(e.labels[i])}${e.partial[i] ? ' (in progress)' : ''}`,
+          note: (i) => (e.partial[i] ? 'Partial week, includes today' : null),
+        }));
+      }
+      hideTip();
+      try { localStorage.setItem('top-models-view', view); } catch { /* storage unavailable */ }
+    };
+    $('range-tabs').addEventListener('click', (ev) => {
+      const b = ev.target.closest('button[data-view]');
+      if (b) setView(b.dataset.view);
+    });
+    let start = '30d';
+    try { start = localStorage.getItem('top-models-view') === '1y' ? '1y' : '30d'; } catch { /* storage unavailable */ }
+    setView(start);
+  } else {
+    $('range-tabs').hidden = true;
   }
 
   function fmtSigned(x) { return (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(1); }
