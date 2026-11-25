@@ -38,8 +38,6 @@
   Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
   Chart.defaults.font.size = 12;
 
-  $('updated').textContent = data.updatedAt ? 'Updated ' + new Date(data.updatedAt).toLocaleString() + '.' : '';
-
   // ---------------------------------------------------------------- tooltip
 
   const tip = $('tooltip');
@@ -185,7 +183,7 @@
   // ---- Chart 1: measured spend (last ~30 days, grows with history)
   const c = data.chart;
   const weekly = c.granularity === 'week';
-  $('chart-sub').textContent = `Spend per ${weekly ? 'week' : 'day'} by model, ${long(c.labels[0])} – ${long(c.labels.at(-1))} (UTC)`;
+  $('chart-sub').textContent = `Spend per ${weekly ? 'week' : 'day'} by model`;
   $('chart-total').textContent = usd(c.total);
   $('chart-total-label').textContent = `total over ${c.bucketDays.reduce((a, b) => a + b, 0)} days`;
 
@@ -250,7 +248,7 @@
       title: `${s.name}${s.key === 'Others' ? '' : ' by ' + s.author} · priced at $${s.ratePerM.toFixed(3)}/M tokens (${sourceLabel[s.rateSource] ?? s.rateSource})`,
     }));
     const fullWeeks = e.partial.filter((p) => !p).length;
-    $('est-sub').textContent = `Rough estimate of spend per week, ${long(e.labels[0])} – ${long(e.labels.at(-1))}. Dots mark weeks with measured spend. Method below the chart.`;
+    $('est-sub').textContent = 'Rough estimate of spend per week. Dots mark weeks with measured spend. Method below the chart.';
     $('est-total').textContent = usd(e.total);
     $('est-total-label').textContent = `estimated over ${fullWeeks} weeks${e.partial.some(Boolean) ? ' + current week' : ''}`;
 
@@ -312,7 +310,7 @@
     const msWeekly = ms.granularity === 'week';
     let msMode = 'pct';
     try { msMode = localStorage.getItem('market-share-mode') === 'abs' ? 'abs' : 'pct'; } catch { /* storage unavailable */ }
-    $('ms-sub').textContent = `Share of spend by model author per ${msWeekly ? 'week' : 'day'}, ${long(ms.labels[0])} – ${long(ms.labels.at(-1))} (UTC)`;
+    $('ms-sub').textContent = `Share of spend by model author per ${msWeekly ? 'week' : 'day'}`;
     const drawMs = stackedChart({
       canvasId: 'ms-chart',
       legendId: 'ms-legend',
@@ -379,9 +377,8 @@
   function drawLeaderboard() {
     const p = data.leaderboard[period];
     $('lb-period').value = period;
-    const range = p.start === p.end ? long(p.end) : `${short(p.start)} – ${long(p.end)}`;
     const desc = period === 'trending' ? 'Biggest week-over-week spend growth' : `${usd(p.total)} total across ${p.modelCount} models`;
-    $('lb-sub').textContent = `${desc} · ${range} (UTC)`;
+    $('lb-sub').textContent = desc;
 
     const list = $('lb-list');
     if (!p.rows.length) {
