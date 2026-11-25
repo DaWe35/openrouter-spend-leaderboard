@@ -5,7 +5,7 @@ services:
     # writes new data there; it shows up on page reload.
     command: httpd -f -v -p 8080 -h /www
     ports:
-      - "${PORT:-8080}:8080"
+      - "127.0.0.1:${PORT:-8080}:8080" # localhost only; not reachable from other machines
     volumes:
       - ./public:/www:ro
     restart: unless-stopped
