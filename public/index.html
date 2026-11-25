@@ -50,7 +50,10 @@
     <header class="page-header">
       <div>
         <h1>OpenRouter LLM Spend Rankings</h1>
-        <p class="muted">Open-weight models are usually heavily over-represented on OpenRouter, while Anthropic and OpenAI are under-represented. BYOK usage is excluded.</p>
+        <p class="muted">Open-weight models are usually heavily over-represented on OpenRouter, while Anthropic and OpenAI are under-represented.</p>
+        <label class="check" title="BYOK (bring your own key) users pay their provider directly. Their usage is valued at the same prices as other traffic.">
+          <input type="checkbox" id="include-byok" checked> Include BYOK usage
+        </label>
       </div>
       <a class="gh-link" href="https://github.com/DaWe35/openrouter-spend-leaderboard" target="_blank" rel="noopener" aria-label="View source on GitHub" title="View source on GitHub">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
@@ -127,8 +130,8 @@
 
     <footer class="muted small">
       <h3>How spend is calculated</h3>
-      <p>For each model and day: <code>(prompt tokens − BYOK prompt tokens) × effective input price + (completion tokens − BYOK completion tokens) × effective output price</code>.</p>
-      <p>Effective prices are OpenRouter's measured average $/token over the last month for each model. They already account for cache-read discounts, cache-write premiums and which providers actually served the traffic. When no effective price is published, the listed price is used, with cached tokens charged at the cache-read rate. BYOK usage is excluded because it's billed by the provider, not OpenRouter. Free variants cost $0.</p>
+      <p>For each model and day: <code>prompt tokens × effective input price + completion tokens × effective output price</code>.</p>
+      <p>Effective prices are OpenRouter's measured average $/token over the last month for each model. They already account for cache-read discounts, cache-write premiums and which providers actually served the traffic. When no effective price is published, the listed price is used, with cached tokens charged at the cache-read rate. BYOK usage is included by default, at the same prices.</p>
       <p>These are estimates built from OpenRouter's public usage statistics, not official figures. Models billed per request, image, document or second (rerank, speech, video) are not fully covered.</p>
     </footer>
   </main>
@@ -136,7 +139,7 @@
   <div class="tooltip" id="tooltip" hidden></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-  <script src="data.js"></script>
-  <script src="app.js"></script>
+  <!-- data.js is rewritten daily; the query string stops browsers from reusing a stale cached copy. -->
+  <script>document.write('<script src="data.js?v=' + Date.now() + '"><\/script><script src="app.js?v=' + Date.now() + '"><\/script>');</script>
 </body>
 </html>

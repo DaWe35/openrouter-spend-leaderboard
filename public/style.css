@@ -87,6 +87,12 @@ code { font-size: 12px; background: var(--surface); border: 1px solid var(--bord
 .tabs button:hover { color: var(--text); }
 .tabs button[aria-selected="true"] { background: var(--raised); color: var(--accent); }
 
+/* Checkbox (e.g. "Include BYOK usage") */
+.check { display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; color: var(--text-2); cursor: pointer; user-select: none; }
+.check:hover { color: var(--text); }
+.check input { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.check[hidden] { display: none; }
+
 /* Dropdown */
 .select { position: relative; display: inline-block; }
 .select select {

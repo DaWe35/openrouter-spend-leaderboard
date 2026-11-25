@@ -47,8 +47,8 @@ The `fetcher` container does this for you. Without Docker, use cron:
 For each model variant and each complete UTC day:
 
 ```
-spend = (prompt tokens     − BYOK prompt tokens)     × effective input price
-      + (completion tokens − BYOK completion tokens) × effective output price
+spend = prompt tokens     × effective input price
+      + completion tokens × effective output price
 ```
 
 - **Effective prices** are OpenRouter's measured average input and output $/token for the model
@@ -59,11 +59,15 @@ spend = (prompt tokens     − BYOK prompt tokens)     × effective input price
   total spend by about 3×.
 - **Fallback:** when a model has no effective price, the itemized list price is used:
   `uncached prompt × input price + cached prompt × cache-read price + completion × output price`.
-- **BYOK is excluded.** Those users pay their provider directly, not OpenRouter.
+- **BYOK is included by default**, at the same prices. Those users pay their provider directly,
+  so this is what the usage costs, not what OpenRouter bills. The BYOK part is shown in the
+  leaderboard tooltips. The "Include BYOK usage" checkbox switches every chart and the
+  leaderboard to billed traffic only; `public/data.js` holds both views (`byok`, `noByok`). Days saved before BYOK was included (older than OpenRouter's ~30-day window) keep
+  their BYOK-excluded values.
 - **Free variants** cost $0 and are skipped. Today's partial UTC day is never included.
 
 Each fetch checks itself against OpenRouter's own internal spend *share* per model (shares only,
-no dollar amounts). It prints the total-variation distance between those shares and ours; 0 means
+no dollar amounts, BYOK excluded on both sides since OpenRouter's shares cover billed traffic only). It prints the total-variation distance between those shares and ours; 0 means
 identical. Expect about 0.03–0.05.
 
 ### 1-year estimate (second chart)
@@ -72,8 +76,8 @@ OpenRouter only publishes a year of **weekly token totals** for each week's top 
 tokens, plus "Others". These totals include BYOK. The estimate turns them into dollars:
 
 - **Named models:** tokens × that model's own $/token. Where the model was used in the last
-  30 days, the rate is its measured spend ÷ its tokens, which captures its cache use,
-  input/output mix and BYOK share. Retired models use OpenRouter's 1-year effective price, or
+  30 days, the rate is its measured spend ÷ its tokens, which captures its cache use and
+  input/output mix. Retired models use OpenRouter's 1-year effective price, or
   list prices. Free and unpriced models count as $0.
 - **"Others":** tokens × one $/token rate, calibrated on the weeks where we have measured spend.
   The fetch log prints a leave-one-out error for each of those weeks; currently it is about ±8%.

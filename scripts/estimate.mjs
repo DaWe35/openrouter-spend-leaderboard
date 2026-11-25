@@ -1,22 +1,23 @@
 // 1-year spend *estimate*, built from OpenRouter's weekly token chart
 // (top 9 models per week + "Others", tokens include BYOK). No I/O here.
 //
-// Per named model, a $/token rate (for BYOK-inclusive tokens):
+// Per named model, a $/token rate (spend and tokens both include BYOK):
 //   measured  — our last-30-day spend ÷ its last-30-day tokens. Captures its real
-//               cache rate, input/output mix and BYOK share.
+//               cache rate and input/output mix.
 //   effective — retired models: OpenRouter's 1-year effective prices, blended with
-//               the platform-wide output share and BYOK share.
+//               the platform-wide output share (and BYOK share, when BYOK is left out).
 //   list      — no effective price: list prices with the platform-wide cache rate.
 //   free      — ":free" variants cost nothing.
 // "Others" gets one rate, calibrated on weeks where we have measured spend.
 
-/** $ per (BYOK-inclusive) token from measured spend. */
-export function measuredRate(usd, tokensInclByok) {
-  return tokensInclByok > 0 ? usd / tokensInclByok : null;
+/** $ per token from measured spend. */
+export function measuredRate(usd, tokens) {
+  return tokens > 0 ? usd / tokens : null;
 }
 
 /** $ per token from per-token input/output prices and platform-wide mix. */
-export function blendedRate({ inPrice, outPrice }, { outFrac, byokShare }) {
+// byokShare: the fraction of tokens to leave out (0 when BYOK is included).
+export function blendedRate({ inPrice, outPrice }, { outFrac, byokShare = 0 }) {
   return (1 - byokShare) * ((1 - outFrac) * inPrice + outFrac * outPrice);
 }
 

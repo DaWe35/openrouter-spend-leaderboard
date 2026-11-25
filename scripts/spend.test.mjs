@@ -19,15 +19,18 @@ test('effective price: tokens × measured $/token', () => {
   assert.equal(r.source, 'effective');
 });
 
-test('BYOK prompt and completion tokens are excluded', () => {
+test('BYOK tokens are included and reported separately', () => {
   const r = daySpend(row({
     total_prompt_tokens: 10 * M, total_completion_tokens: 2 * M,
     total_byok_prompt_tokens: 4 * M, total_byok_completion_tokens: 1 * M,
   }), { eff: { in: 1 / M, out: 10 / M } });
-  close(r.inUsd, 6);   // (10M - 4M) × $1/M
-  close(r.outUsd, 10); // (2M - 1M) × $10/M
-  close(r.promptTok, 6 * M);
-  close(r.completionTok, 1 * M);
+  close(r.inUsd, 10);  // 10M × $1/M
+  close(r.outUsd, 20); // 2M × $10/M
+  close(r.byokInUsd, 4);   // 4M × $1/M
+  close(r.byokOutUsd, 10); // 1M × $10/M
+  close(r.byokPromptTok, 4 * M);
+  close(r.promptTok, 10 * M);
+  close(r.completionTok, 2 * M);
 });
 
 test('list-price fallback prices cached tokens at the cache-read rate', () => {
@@ -40,14 +43,16 @@ test('list-price fallback prices cached tokens at the cache-read rate', () => {
   assert.equal(r.source, 'list');
 });
 
-test('list-price fallback scales to the non-BYOK share', () => {
+test('list-price fallback splits BYOK by its share of prompt tokens', () => {
   const r = daySpend(row({
     total_prompt_tokens: 10 * M, total_native_tokens_cached: 5 * M,
     total_byok_prompt_tokens: 5 * M, total_completion_tokens: 2 * M, total_byok_completion_tokens: 1 * M,
   }), { list: { prompt: 2 / M, cacheRead: 0.2 / M, completion: 10 / M } });
-  close(r.inUsd, (5 * 2 + 5 * 0.2) * 0.5); // 5.5
-  close(r.outUsd, 10);
-  close(r.cachedTok, 2.5 * M);
+  close(r.inUsd, 5 * 2 + 5 * 0.2); // 11
+  close(r.outUsd, 20);
+  close(r.byokInUsd, 11 * 0.5);
+  close(r.byokOutUsd, 10);
+  close(r.cachedTok, 5 * M);
 });
 
 test('zero effective price falls back to list; free models cost nothing', () => {
@@ -73,12 +78,22 @@ test('only complete UTC days count', () => {
 
 test('aggregate, change, top-N', () => {
   const days = {
-    '2026-11-01': { a: [1, 2, 10, 5, 3], b: [0.5, 0.5, 1, 1, 0] },
-    '2026-11-02': { a: [1, 1, 10, 5, 3] },
+    '2026-11-01': { a: [1, 2, 10, 5, 4, 0.5, 0.5, 5, 1], b: [0.5, 0.5, 1, 1, 0] },
+    '2026-11-02': { a: [1, 1, 10, 5, 4, 0.5, 0, 5, 0] },
   };
   const t = aggregate(days, ['2026-11-01', '2026-11-02', '2026-11-03']);
   close(t.get('a').usd, 5);
-  close(t.get('a').cachedTok, 6);
+  close(t.get('a').cachedTok, 8);
+  close(t.get('a').byokUsd, 1.5);
+  close(t.get('b').byokUsd, 0); // pre-BYOK tuple
+  const n = aggregate(days, ['2026-11-01', '2026-11-02'], { byok: false });
+  close(n.get('a').usd, 3.5);
+  close(n.get('a').inUsd, 1);
+  close(n.get('a').promptTok, 10);
+  close(n.get('a').completionTok, 9);
+  close(n.get('a').cachedTok, 4); // same cache rate as all traffic
+  close(n.get('a').byokUsd, 0);
+  close(n.get('b').usd, 1); // pre-BYOK tuple is already BYOK-free
   close(t.get('b').usd, 1);
   assert.equal(changePct(150, 100), 50);
   assert.equal(changePct(5, 0), null);
@@ -102,11 +117,13 @@ import { measuredRate, blendedRate, listRate, calibrateOthers, estimateWeeks } f
 test('estimate rates', () => {
   close(measuredRate(100, 1e6), 1e-4);
   assert.equal(measuredRate(5, 0), null);
-  const g = { outFrac: 0.1, byokShare: 0.5, cacheRate: 0.8 };
-  // 0.5 × (0.9 × $1/M + 0.1 × $10/M) = $0.95/M
-  close(blendedRate({ inPrice: 1 / M, outPrice: 10 / M }, g) * M, 0.95);
-  // input: 0.2 × $5 + 0.8 × $0.5 = $1.4/M → 0.5 × (0.9 × 1.4 + 0.1 × 20) = $1.63/M
-  close(listRate({ prompt: 5 / M, cacheRead: 0.5 / M, completion: 20 / M }, g) * M, 1.63);
+  const g = { outFrac: 0.1, cacheRate: 0.8 };
+  // 0.9 × $1/M + 0.1 × $10/M = $1.9/M
+  close(blendedRate({ inPrice: 1 / M, outPrice: 10 / M }, g) * M, 1.9);
+  // input: 0.2 × $5 + 0.8 × $0.5 = $1.4/M → 0.9 × 1.4 + 0.1 × 20 = $3.26/M
+  close(listRate({ prompt: 5 / M, cacheRead: 0.5 / M, completion: 20 / M }, g) * M, 3.26);
+  // Leaving out a 50% BYOK share halves it.
+  close(blendedRate({ inPrice: 1 / M, outPrice: 10 / M }, { ...g, byokShare: 0.5 }) * M, 0.95);
 });
 
 test('others calibration and weekly estimate', () => {

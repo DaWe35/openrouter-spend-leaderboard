@@ -1,12 +1,19 @@
 /* global Chart */
 (function () {
-  const data = window.SPEND_DATA;
+  const ALL = window.SPEND_DATA;
   const $ = (id) => document.getElementById(id);
-  if (!data) {
+  if (!ALL) {
     document.querySelector('main').insertAdjacentHTML('beforeend',
       '<p class="empty">No data yet. Run <code>npm run fetch</code> first.</p>');
     return;
   }
+
+  // data.js holds two views: with BYOK usage (the default) and without. Older files have one.
+  const hasByokToggle = !!ALL.byok;
+  let includeByok = true;
+  try { includeByok = localStorage.getItem('include-byok') !== '0'; } catch { /* storage unavailable */ }
+  const pick = () => (hasByokToggle ? ALL[includeByok ? 'byok' : 'noByok'] : ALL);
+  let data = pick();
 
   // ---------------------------------------------------------------- formatting
 
@@ -34,6 +41,7 @@
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const modelUrl = (slug) => 'https://openrouter.ai/' + slug.split('/').map(encodeURIComponent).join('/');
   const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  function fmtSigned(x) { return (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(1); }
 
   Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
   Chart.defaults.font.size = 12;
@@ -103,6 +111,7 @@
 
       const textColor = cssVar('--text-2');
       if (chart) chart.destroy();
+      Chart.getChart($(canvasId))?.destroy(); // chart from the other BYOK view on this canvas
       chart = new Chart($(canvasId), {
         data: { labels, datasets },
         options: {
@@ -154,7 +163,7 @@
       const rect = ch.canvas.getBoundingClientRect();
       showTip(html, rect.left + t.caretX, rect.top + t.caretY);
     }
-    $(canvasId).addEventListener('mouseleave', hideTip);
+    $(canvasId).onmouseleave = hideTip;
 
     function drawLegend() {
       const grand = series.reduce((a, s) => a + s.total, 0);
@@ -179,13 +188,6 @@
     draw();
     return draw;
   }
-
-  // ---- Chart 1: measured spend (last ~30 days, grows with history)
-  const c = data.chart;
-  const weekly = c.granularity === 'week';
-  $('chart-sub').textContent = `Spend per ${weekly ? 'week' : 'day'} by model`;
-  $('chart-total').textContent = usd(c.total);
-  $('chart-total-label').textContent = `total over ${c.bucketDays.reduce((a, b) => a + b, 0)} days`;
 
   // Both charts color like openrouter.ai's Top Models chart: series in order of first appearance
   // (each bar's top 9, then "Others"), color = palette[index % 20] with "Others" included,
@@ -223,30 +225,40 @@
     ];
   };
 
-  const redraw = [];
-  redraw.push(stackedChart({
-    canvasId: 'chart',
-    legendId: 'legend',
-    labels: c.labels,
-    series: withDistinctColors(c.series),
-    legendLimit: 20,
-    title: (i) => {
-      const label = c.labels[i];
-      const days = c.bucketDays[i];
-      return weekly
-        ? `Week of ${long(label)}${days < 7 ? ` (${days} day${days > 1 ? 's' : ''})` : ''}`
-        : fmtDate(label, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
-    },
-  }));
+  // Redraw function per canvas, used when the color scheme changes.
+  const redraw = {};
+
+  // ---- Chart 1: measured spend (last ~30 days, grows with history)
+  function renderTopModels() {
+    const c = data.chart;
+    const weekly = c.granularity === 'week';
+    $('chart-sub').textContent = `Spend per ${weekly ? 'week' : 'day'} by model`;
+    $('chart-total').textContent = usd(c.total);
+    $('chart-total-label').textContent = `total over ${c.bucketDays.reduce((a, b) => a + b, 0)} days`;
+    redraw.chart = stackedChart({
+      canvasId: 'chart',
+      legendId: 'legend',
+      labels: c.labels,
+      series: withDistinctColors(c.series),
+      legendLimit: 20,
+      title: (i) => {
+        const label = c.labels[i];
+        const days = c.bucketDays[i];
+        return weekly
+          ? `Week of ${long(label)}${days < 7 ? ` (${days} day${days > 1 ? 's' : ''})` : ''}`
+          : fmtDate(label, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+      },
+    });
+  }
 
   // ---- Chart 2: 1-year estimate from OpenRouter's weekly token chart
-  const e = data.estimate;
-  if (e) {
-    const sourceLabel = { measured: 'last 30 days measured $/token', effective: '1-year effective price', list: 'list price', free: 'free', unpriced: 'no price data', calibrated: 'calibrated on measured weeks' };
-    const estSeries = withColors(e.series).map((s) => ({
-      ...s,
-      title: `${s.name}${s.key === 'Others' ? '' : ' by ' + s.author} · priced at $${s.ratePerM.toFixed(3)}/M tokens (${sourceLabel[s.rateSource] ?? s.rateSource})`,
-    }));
+  // "30 days | 1 year (est.)" switch. The estimate chart is only built when it's shown.
+  let view = '30d';
+  try { view = localStorage.getItem('top-models-view') === '1y' ? '1y' : '30d'; } catch { /* storage unavailable */ }
+  let estBuilt = false;
+
+  function renderEstimateText() {
+    const e = data.estimate;
     const fullWeeks = e.partial.filter((p) => !p).length;
     $('est-sub').textContent = 'Rough estimate of spend per week. Dots mark weeks with measured spend. Method below the chart.';
     $('est-total').textContent = usd(e.total);
@@ -258,60 +270,89 @@
     $('est-method').textContent =
       `How this is estimated: OpenRouter publishes a year of weekly token totals for each week's top 9 models plus "Others" (BYOK included). ` +
       `Each named model's tokens are multiplied by its own $/token: ${s.measured ?? 0} of ${e.namedModels} use their measured spend ÷ tokens over the last 30 days ` +
-      `(this captures each model's cache use, input/output mix and BYOK share)` +
+      `(this captures each model's cache use, input/output mix${includeByok ? '' : ' and BYOK share'})` +
       (s.effective ? `, ${s.effective} use OpenRouter's 1-year effective price` : '') +
       (s.list ? `, ${s.list} use list prices` : '') +
       `, ${s.free ?? 0} are free variants and ${s.unpriced ?? 0} have no price data (mostly free stealth/preview models), counted as $0. ` +
       `"Others" tokens are priced at $${e.othersRatePerM.toFixed(3)}/M, calibrated on ${e.calibration.length} week(s) with measured spend${errRange}. ` +
+      (!includeByok && e.globals?.byokShare
+        ? `Without BYOK, effective and list prices are scaled down by the platform-wide BYOK share (${pct(e.globals.byokShare)} of tokens). `
+        : '') +
       `Older weeks are less certain: prices, cache use and the model mix change over time, and today's rates are applied to the whole year.`;
+  }
 
-    // "30 days | 1 year (est.)" switch. The estimate chart is only built the first time it's shown.
-    let built = false;
-    const setView = (view) => {
-      const year = view === '1y';
-      $('view-30d').hidden = year;
-      $('view-1y').hidden = !year;
-      $('chart-hero').hidden = year;
-      $('est-hero').hidden = !year;
-      $('chart-sub').hidden = year;
-      $('est-sub').hidden = !year;
-      $('est-badge').hidden = !year;
-      document.querySelectorAll('#range-tabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.view === view)));
-      if (year && !built) {
-        built = true;
-        redraw.push(stackedChart({
-          canvasId: 'est-chart',
-          legendId: 'est-legend',
-          labels: e.labels,
-          series: estSeries,
-          legendLimit: 20,
-          measured: e.measured.some((m) => m != null) ? e.measured : null,
-          title: (i) => `Week of ${long(e.labels[i])}${e.partial[i] ? ' (in progress)' : ''}`,
-          note: (i) => (e.partial[i] ? 'Partial week, includes today' : null),
-        }));
-      }
-      hideTip();
-      try { localStorage.setItem('top-models-view', view); } catch { /* storage unavailable */ }
-    };
-    $('range-tabs').addEventListener('click', (ev) => {
-      const b = ev.target.closest('button[data-view]');
-      if (b) setView(b.dataset.view);
+  function buildEstimateChart() {
+    const e = data.estimate;
+    const sourceLabel = { measured: 'last 30 days measured $/token', effective: '1-year effective price', list: 'list price', free: 'free', unpriced: 'no price data', calibrated: 'calibrated on measured weeks' };
+    const estSeries = withColors(e.series).map((s) => ({
+      ...s,
+      title: `${s.name}${s.key === 'Others' ? '' : ' by ' + s.author} · priced at $${s.ratePerM.toFixed(3)}/M tokens (${sourceLabel[s.rateSource] ?? s.rateSource})`,
+    }));
+    redraw['est-chart'] = stackedChart({
+      canvasId: 'est-chart',
+      legendId: 'est-legend',
+      labels: e.labels,
+      series: estSeries,
+      legendLimit: 20,
+      measured: e.measured.some((m) => m != null) ? e.measured : null,
+      title: (i) => `Week of ${long(e.labels[i])}${e.partial[i] ? ' (in progress)' : ''}`,
+      note: (i) => (e.partial[i] ? 'Partial week, includes today' : null),
     });
-    let start = '30d';
-    try { start = localStorage.getItem('top-models-view') === '1y' ? '1y' : '30d'; } catch { /* storage unavailable */ }
-    setView(start);
-  } else {
-    $('range-tabs').hidden = true;
+  }
+
+  function setView(v) {
+    view = data.estimate ? v : '30d';
+    const year = view === '1y';
+    $('view-30d').hidden = year;
+    $('view-1y').hidden = !year;
+    $('chart-hero').hidden = year;
+    $('est-hero').hidden = !year;
+    $('chart-sub').hidden = year;
+    $('est-sub').hidden = !year;
+    $('est-badge').hidden = !year;
+    document.querySelectorAll('#range-tabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.view === view)));
+    if (year && !estBuilt) {
+      estBuilt = true;
+      buildEstimateChart();
+    }
+    hideTip();
+    try { localStorage.setItem('top-models-view', view); } catch { /* storage unavailable */ }
+  }
+  $('range-tabs').addEventListener('click', (ev) => {
+    const b = ev.target.closest('button[data-view]');
+    if (b) setView(b.dataset.view);
+  });
+
+  function renderEstimate() {
+    estBuilt = false;
+    delete redraw['est-chart'];
+    $('range-tabs').hidden = !data.estimate;
+    if (data.estimate) renderEstimateText();
+    setView(view);
   }
 
   // ---- Market share by model author (Absolute | Percentage), colored like openrouter.ai
-  const ms = data.marketShare;
-  if (ms) {
+  let msMode = 'pct';
+  try { msMode = localStorage.getItem('market-share-mode') === 'abs' ? 'abs' : 'pct'; } catch { /* storage unavailable */ }
+  const syncMsTabs = () => document.querySelectorAll('#ms-tabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.mode === msMode)));
+  $('ms-tabs').addEventListener('click', (ev) => {
+    const b = ev.target.closest('button[data-mode]');
+    if (!b || b.dataset.mode === msMode) return;
+    msMode = b.dataset.mode;
+    try { localStorage.setItem('market-share-mode', msMode); } catch { /* ignore */ }
+    syncMsTabs();
+    hideTip();
+    redraw['ms-chart']?.();
+  });
+
+  function renderMarketShare() {
+    const ms = data.marketShare;
+    $('market-share').hidden = !ms;
+    if (!ms) return;
     const msWeekly = ms.granularity === 'week';
-    let msMode = 'pct';
-    try { msMode = localStorage.getItem('market-share-mode') === 'abs' ? 'abs' : 'pct'; } catch { /* storage unavailable */ }
     $('ms-sub').textContent = `Share of spend by model author per ${msWeekly ? 'week' : 'day'}`;
-    const drawMs = stackedChart({
+    syncMsTabs();
+    redraw['ms-chart'] = stackedChart({
       canvasId: 'ms-chart',
       legendId: 'ms-legend',
       labels: ms.labels,
@@ -322,23 +363,7 @@
         ? `Week of ${long(ms.labels[i])}`
         : fmtDate(ms.labels[i], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })),
     });
-    redraw.push(drawMs);
-    const syncTabs = () => document.querySelectorAll('#ms-tabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.mode === msMode)));
-    syncTabs();
-    $('ms-tabs').addEventListener('click', (ev) => {
-      const b = ev.target.closest('button[data-mode]');
-      if (!b || b.dataset.mode === msMode) return;
-      msMode = b.dataset.mode;
-      try { localStorage.setItem('market-share-mode', msMode); } catch { /* ignore */ }
-      syncTabs();
-      hideTip();
-      drawMs();
-    });
-  } else {
-    $('market-share').hidden = true;
   }
-
-  function fmtSigned(x) { return (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(1); }
 
   // ---------------------------------------------------------------- leaderboard
 
@@ -366,6 +391,7 @@
     return `<div class="t-title">${esc(r.name)}</div>` +
       kv('Input spend', usd(r.inUsd)) +
       kv('Output spend', usd(r.outUsd)) +
+      (r.byokUsd != null ? kv('of which BYOK', usd(r.byokUsd) + (r.usd > 0 ? ` (${pct(r.byokUsd / r.usd)})` : '')) : '') +
       kv('Input tokens', tokens(r.promptTok)) +
       kv('Output tokens', tokens(r.completionTok)) +
       kv('Cache hit rate', r.cacheHit == null ? '–' : pct(r.cacheHit)) +
@@ -420,7 +446,28 @@
 
   // ---------------------------------------------------------------- boot
 
-  if (!data.leaderboard[period]) period = 'week';
-  drawLeaderboard();
-  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => redraw.forEach((f) => f()));
+  function renderAll() {
+    hideTip();
+    renderTopModels();
+    renderEstimate();
+    renderMarketShare();
+    if (!data.leaderboard[period]) period = 'week';
+    drawLeaderboard();
+  }
+
+  const byokBox = $('include-byok');
+  if (hasByokToggle) {
+    byokBox.checked = includeByok;
+    byokBox.addEventListener('change', () => {
+      includeByok = byokBox.checked;
+      try { localStorage.setItem('include-byok', includeByok ? '1' : '0'); } catch { /* ignore */ }
+      data = pick();
+      renderAll();
+    });
+  } else {
+    byokBox.closest('label').hidden = true;
+  }
+
+  renderAll();
+  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => Object.values(redraw).forEach((f) => f()));
 })();

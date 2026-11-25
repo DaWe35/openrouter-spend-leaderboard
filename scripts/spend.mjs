@@ -9,9 +9,12 @@ const DAY_MS = 86_400_000;
  *
  * @param {object} row   Activity row from OpenRouter's model-activity endpoint.
  * @param {object} price { eff: {in, out} | null, list: {prompt, completion, cacheRead} | null }
- * @returns {{inUsd:number, outUsd:number, promptTok:number, completionTok:number, cachedTok:number, source:string}}
+ * @returns {{inUsd, outUsd, promptTok, completionTok, cachedTok, byokInUsd, byokOutUsd, byokPromptTok, byokCompletionTok, source}}
  *
- * BYOK traffic is excluded: those users pay their provider directly, not OpenRouter.
+ * BYOK traffic is included, valued at the same prices as other traffic (those users pay
+ * their provider directly, so it's an estimate of what the usage costs, not of what
+ * OpenRouter bills). The byok* fields are the BYOK part of each total, so the page can
+ * also show spend without BYOK.
  *
  * Preferred: OpenRouter's measured effective prices. `eff.in` is a blended price per
  * prompt token (cached + uncached) that already reflects cache-read discounts,
@@ -19,7 +22,6 @@ const DAY_MS = 86_400_000;
  *
  * Fallback (no effective price available): itemized list price
  *   (uncached prompt × prompt price) + (cached prompt × cache-read price) + (completion × completion price)
- * scaled to the non-BYOK share of traffic.
  */
 export function daySpend(row, { eff = null, list = null } = {}) {
   const P = num(row.total_prompt_tokens);
@@ -27,29 +29,34 @@ export function daySpend(row, { eff = null, list = null } = {}) {
   const K = Math.min(num(row.total_native_tokens_cached), P);
   const BP = Math.min(num(row.total_byok_prompt_tokens), P);
   const BC = Math.min(num(row.total_byok_completion_tokens), C);
-
-  const promptTok = P - BP;
-  const completionTok = C - BC;
-  const nonByokShare = P > 0 ? promptTok / P : 0;
   // Cached tokens aren't split by BYOK, so assume the same cache rate for both.
-  const cachedTok = K * nonByokShare;
+  const byokPromptShare = P > 0 ? BP / P : 0;
 
   let inUsd = 0;
   let outUsd = 0;
+  let byokInUsd = 0;
+  let byokOutUsd = 0;
   let source = 'none';
 
   if (hasEffective(eff)) {
-    inUsd = promptTok * eff.in;
-    outUsd = completionTok * eff.out;
+    inUsd = P * eff.in;
+    outUsd = C * eff.out;
+    byokInUsd = BP * eff.in;
+    byokOutUsd = BC * eff.out;
     source = 'effective';
   } else if (list) {
     const cacheRead = list.cacheRead ?? list.prompt;
-    inUsd = ((P - K) * list.prompt + K * cacheRead) * nonByokShare;
-    outUsd = completionTok * list.completion;
+    inUsd = (P - K) * list.prompt + K * cacheRead;
+    outUsd = C * list.completion;
+    byokInUsd = inUsd * byokPromptShare;
+    byokOutUsd = BC * list.completion;
     source = 'list';
   }
 
-  return { inUsd, outUsd, promptTok, completionTok, cachedTok, source };
+  return {
+    inUsd, outUsd, promptTok: P, completionTok: C, cachedTok: K,
+    byokInUsd, byokOutUsd, byokPromptTok: BP, byokCompletionTok: BC, source,
+  };
 }
 
 export function hasEffective(eff) {
@@ -78,29 +85,44 @@ export function weekStart(date) {
   return addDays(date, -((dow + 6) % 7));
 }
 
-// A day entry in history is a compact tuple:
-//   [inUsd, outUsd, promptTok, completionTok, cachedTok]
-export const IN = 0, OUT = 1, PTOK = 2, CTOK = 3, KTOK = 4;
+// A day entry in history is a compact tuple. The first five include BYOK; the last four
+// are the BYOK part of each:
+//   [inUsd, outUsd, promptTok, completionTok, cachedTok, byokInUsd, byokOutUsd, byokPromptTok, byokCompletionTok]
+// Days saved before BYOK was tracked have only the first five, and those exclude BYOK.
+export const IN = 0, OUT = 1, PTOK = 2, CTOK = 3, KTOK = 4, BIN = 5, BOUT = 6, BPTOK = 7, BCTOK = 8;
+export const TUPLE_LEN = 9;
+
+/** USD for one day entry, with or without its BYOK part. */
+export function tupleUsd(t, byok = true) {
+  return t[IN] + t[OUT] - (byok ? 0 : (t[BIN] ?? 0) + (t[BOUT] ?? 0));
+}
 
 /**
  * Sum per-model spend over a list of dates.
  * @param {Record<string, Record<string, number[]>>} days  history.days
- * @returns {Map<string, {inUsd, outUsd, usd, promptTok, completionTok, cachedTok}>}
+ * @param {{byok?: boolean}} opts  byok: false leaves BYOK usage out
+ * @returns {Map<string, {inUsd, outUsd, usd, byokUsd, promptTok, completionTok, cachedTok}>}
+ *   byokUsd is the BYOK part of usd (0 when byok is false).
  */
-export function aggregate(days, dates) {
+export function aggregate(days, dates, { byok = true } = {}) {
   const totals = new Map();
   for (const date of dates) {
     const day = days[date];
     if (!day) continue;
     for (const [key, t] of Object.entries(day)) {
       let a = totals.get(key);
-      if (!a) totals.set(key, (a = { inUsd: 0, outUsd: 0, usd: 0, promptTok: 0, completionTok: 0, cachedTok: 0 }));
-      a.inUsd += t[IN];
-      a.outUsd += t[OUT];
-      a.usd += t[IN] + t[OUT];
-      a.promptTok += t[PTOK];
-      a.completionTok += t[CTOK];
-      a.cachedTok += t[KTOK];
+      if (!a) totals.set(key, (a = { inUsd: 0, outUsd: 0, usd: 0, byokUsd: 0, promptTok: 0, completionTok: 0, cachedTok: 0 }));
+      const bIn = byok ? 0 : t[BIN] ?? 0;
+      const bOut = byok ? 0 : t[BOUT] ?? 0;
+      const promptTok = t[PTOK] - (byok ? 0 : t[BPTOK] ?? 0);
+      a.inUsd += t[IN] - bIn;
+      a.outUsd += t[OUT] - bOut;
+      a.usd += t[IN] + t[OUT] - bIn - bOut;
+      a.byokUsd += byok ? (t[BIN] ?? 0) + (t[BOUT] ?? 0) : 0;
+      a.promptTok += promptTok;
+      a.completionTok += t[CTOK] - (byok ? 0 : t[BCTOK] ?? 0);
+      // Cached tokens aren't split by BYOK; assume the same cache rate for both.
+      a.cachedTok += t[PTOK] > 0 ? t[KTOK] * (promptTok / t[PTOK]) : 0;
     }
   }
   return totals;
