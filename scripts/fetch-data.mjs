@@ -19,7 +19,7 @@ const OUTPUT_FILE = join(ROOT, 'public', 'data.js');
 const API = 'https://openrouter.ai/api/frontend/v1/public';
 const CONCURRENCY = 4;
 const MAX_HISTORY_DAYS = 400;
-const CHART_TOP_N = 9; // per bar, like openrouter.ai
+const CHART_TOP_N = 20; // models per bar (openrouter.ai uses 9)
 const LEADERBOARD_ROWS = 100;
 
 const limitArg = process.argv.indexOf('--limit');
@@ -292,7 +292,7 @@ function buildChart(h, dates) {
     series: order.map((key) => ({
       key,
       name: key === 'Others' ? 'Others' : h.models[key]?.name ?? key,
-      author: key === 'Others' ? "All models outside each bar's top 9 by spend" : h.models[key]?.author ?? key.split('/')[0],
+      author: key === 'Others' ? `All models outside each bar's top ${CHART_TOP_N} by spend` : h.models[key]?.author ?? key.split('/')[0],
       slug: key === 'Others' ? '' : h.models[key]?.slug ?? key.split(':')[0],
       total: round2(sum(values.get(key))),
       values: values.get(key).map(round2),

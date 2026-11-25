@@ -201,13 +201,37 @@
     return [...colored.filter((s) => s.key === 'Others'), ...colored.filter((s) => s.key !== 'Others')];
   };
 
+  // For bars with up to 20 models + Others: "Others" keeps OpenRouter's pink, named models
+  // use the other 19 OpenRouter colors plus a few extras (models rotate in and out of the
+  // top 20, so 20 colors aren't enough). Each model starts from its index color (like
+  // openrouter.ai) but skips colors already used by a model it shares a bar with.
+  const OTHERS_HEX = '#ff69b4';
+  const NAMED_PALETTE = [...OR_PALETTE.filter((h) => h !== OTHERS_HEX),
+    '#a0522d', '#4169e1', '#c71585', '#008b8b', '#cd853f', '#9932cc', '#e9967a', '#00bfff'];
+  const withDistinctColors = (series) => {
+    const named = series.filter((s) => s.key !== 'Others');
+    const assigned = new Map();
+    named.forEach((s, i) => {
+      const taken = new Set(named
+        .filter((o) => assigned.has(o.key) && o.values.some((v, j) => v > 0 && s.values[j] > 0))
+        .map((o) => assigned.get(o.key)));
+      let idx = i % NAMED_PALETTE.length;
+      for (let n = 0; n < NAMED_PALETTE.length && taken.has(idx); n++) idx = (idx + 1) % NAMED_PALETTE.length;
+      assigned.set(s.key, idx);
+    });
+    return [
+      ...series.filter((s) => s.key === 'Others').map((s) => ({ ...s, hex: OTHERS_HEX })),
+      ...named.map((s) => ({ ...s, hex: NAMED_PALETTE[assigned.get(s.key)] })),
+    ];
+  };
+
   const redraw = [];
   redraw.push(stackedChart({
     canvasId: 'chart',
     legendId: 'legend',
     labels: c.labels,
-    series: withColors(c.series),
-    legendLimit: 15,
+    series: withDistinctColors(c.series),
+    legendLimit: 20,
     title: (i) => {
       const label = c.labels[i];
       const days = c.bucketDays[i];
@@ -248,7 +272,7 @@
       legendId: 'est-legend',
       labels: e.labels,
       series: estSeries,
-      legendLimit: 15,
+      legendLimit: 20,
       measured: e.measured.some((m) => m != null) ? e.measured : null,
       title: (i) => `Week of ${long(e.labels[i])}${e.partial[i] ? ' (in progress)' : ''}`,
       note: (i) => (e.partial[i] ? 'Partial week, includes today' : null),
