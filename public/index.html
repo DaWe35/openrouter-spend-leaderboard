@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LLM Spend Rankings</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <header class="page-header">
+      <h1>LLM Spend Rankings</h1>
+      <p class="muted">Estimated USD spent per model on OpenRouter, excluding BYOK. <span id="updated"></span></p>
+    </header>
+
+    <section id="top-models" class="card">
+      <div class="section-head">
+        <div>
+          <h2>Top Models</h2>
+          <p class="muted" id="chart-sub"></p>
+        </div>
+        <div class="hero">
+          <div class="hero-value" id="chart-total"></div>
+          <div class="muted small" id="chart-total-label"></div>
+        </div>
+      </div>
+      <div class="chart-wrap"><canvas id="chart" aria-label="Stacked bar chart of spend by model" role="img"></canvas></div>
+      <ol class="legend" id="legend"></ol>
+    </section>
+
+    <section id="leaderboard" class="card">
+      <div class="section-head">
+        <div>
+          <h2>LLM Leaderboard</h2>
+          <p class="muted" id="lb-sub"></p>
+        </div>
+        <div class="tabs" role="tablist" id="tabs">
+          <button role="tab" data-period="day">Day</button>
+          <button role="tab" data-period="week">Week</button>
+          <button role="tab" data-period="month">Month</button>
+          <button role="tab" data-period="trending">Trending</button>
+        </div>
+      </div>
+      <ol class="lb" id="lb-list"></ol>
+      <button class="more" id="lb-more" hidden>Show more</button>
+    </section>
+
+    <footer class="muted small">
+      <h3>How spend is calculated</h3>
+      <p>For each model and day: <code>(prompt tokens − BYOK prompt tokens) × effective input price + (completion tokens − BYOK completion tokens) × effective output price</code>.</p>
+      <p>Effective prices are OpenRouter's measured average $/token over the last month for each model. They already account for cache-read discounts, cache-write premiums and which providers actually served the traffic. When no effective price is published, the listed price is used, with cached tokens charged at the cache-read rate. BYOK usage is excluded because it's billed by the provider, not OpenRouter. Free variants cost $0.</p>
+      <p>These are estimates built from OpenRouter's public usage statistics, not official figures. Models billed per request, image, document or second (rerank, speech, video) are not fully covered.</p>
+    </footer>
+  </main>
+
+  <div class="tooltip" id="tooltip" hidden></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

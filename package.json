@@ -1,0 +1,14 @@
+{
+  "name": "openrouter-spend-leaderboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenRouter's Top Models chart and LLM Leaderboard, ranked by estimated USD spend instead of tokens.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "fetch": "node scripts/fetch-data.mjs",
+    "test": "node --test scripts/"
+  }
+}
