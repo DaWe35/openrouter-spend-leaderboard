@@ -15,10 +15,15 @@ npm test               # unit tests for the spend math
 Or run everything in Docker with `docker compose up -d`. This starts two containers:
 
 - `web`: a busybox `httpd` serving `public/` at http://localhost:8080.
-- `fetcher`: Node, which runs the fetch on startup and then daily at 03:00 UTC (set
-  `FETCH_HOUR_UTC` in the compose file to change the hour). It writes `data/` and `public/`
-  as UID/GID 1000 by default; set `FETCH_UID` and `FETCH_GID` if your user differs. Logs:
-  `docker compose logs -f fetcher`.
+- `fetcher`: Node, which runs the fetch on startup and then daily at 03:00 UTC. It writes
+  `data/` and `public/` as UID/GID 1000 by default. Logs: `docker compose logs -f fetcher`.
+
+To change the port, copy `.env.example` to `.env` and edit it:
+
+```sh
+cp .env.example .env   # then edit PORT
+docker compose up -d   # re-run after changing .env to apply it
+```
 
 `npm run fetch -- --limit 40` fetches only the 40 largest models, for a quick dev run. It does not save history.
 

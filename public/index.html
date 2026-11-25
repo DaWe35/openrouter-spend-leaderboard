@@ -63,6 +63,21 @@
       <button class="more" id="lb-more" hidden>Show more</button>
     </section>
 
+    <section id="market-share" class="card">
+      <div class="section-head">
+        <div>
+          <h2>Market Share</h2>
+          <p class="muted" id="ms-sub"></p>
+        </div>
+        <div class="tabs" role="tablist" id="ms-tabs" aria-label="Scale">
+          <button role="tab" data-mode="abs">Absolute</button>
+          <button role="tab" data-mode="pct">Percentage</button>
+        </div>
+      </div>
+      <div class="chart-wrap"><canvas id="ms-chart" aria-label="Spend share by model author" role="img"></canvas></div>
+      <ol class="legend" id="ms-legend"></ol>
+    </section>
+
     <footer class="muted small">
       <h3>How spend is calculated</h3>
       <p>For each model and day: <code>(prompt tokens − BYOK prompt tokens) × effective input price + (completion tokens − BYOK completion tokens) × effective output price</code>.</p>

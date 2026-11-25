@@ -65,16 +65,19 @@
   }
 
   // A stacked-bar spend chart with legend. `measured` (optional) overlays dots.
-  function stackedChart({ canvasId, legendId, labels, series, measured, title, note, legendLimit = Infinity }) {
+  // `percent()` (optional) switches to 100%-stacked bars; tooltips then also show shares.
+  function stackedChart({ canvasId, legendId, labels, series, measured, title, note, legendLimit = Infinity, itemLabel = 'models', percent = () => false }) {
     let chart;
     let legendOpen = false;
+    const barTotals = labels.map((_, i) => series.reduce((a, s) => a + (s.values[i] || 0), 0));
     function draw() {
       drawLegend();
       const surface = cssVar('--surface');
+      const pctMode = percent();
       const datasets = series.map((s) => ({
         type: 'bar',
         label: s.name,
-        data: s.values,
+        data: pctMode ? s.values.map((v, i) => (barTotals[i] > 0 ? (v / barTotals[i]) * 100 : 0)) : s.values,
         backgroundColor: color(s),
         hoverBackgroundColor: color(s),
         borderColor: surface,
@@ -123,9 +126,10 @@
             },
             y: {
               stacked: true,
+              max: pctMode ? 100 : undefined,
               grid: { color: grid },
               border: { display: false },
-              ticks: { color: textColor, callback: (v) => usd(v, 0), maxTicksLimit: 6 },
+              ticks: { color: textColor, callback: (v) => (pctMode ? v + '%' : usd(v, 0)), maxTicksLimit: 6 },
             },
           },
           plugins: {
@@ -146,7 +150,7 @@
       const total = rows.reduce((a, r) => a + r.v, 0);
       const kv = (k, v, cls = '') => `<div class="t-row kv ${cls}"><span>${k}</span><span>${v}</span></div>`;
       let html = `<div class="t-title">${esc(title(i))}</div>` +
-        rows.map(({ s, v }) => `<div class="t-row"><span class="swatch" style="background:${color(s)}"></span><span>${esc(s.name)}</span><span>${usd(v)}</span></div>`).join('') +
+        rows.map(({ s, v }) => `<div class="t-row"><span class="swatch" style="background:${color(s)}"></span><span>${esc(s.name)}</span><span>${percent() ? `${pct(v / total)} · ` : ''}${usd(v)}</span></div>`).join('') +
         kv(measured ? 'Estimated total' : 'Total', usd(total), 't-total');
       if (measured?.[i] != null) {
         const diff = ((total - measured[i]) / measured[i]) * 100;
@@ -173,7 +177,7 @@
       $(legendId).innerHTML = visible.map(item).join('') + others.map(item).join('') +
         (measured ? '<li><span class="rank"></span><span class="dot"></span><span class="name">Measured total (actual spend)</span><span class="val"></span></li>' : '') +
         (named.length > legendLimit
-          ? `<li class="legend-toggle"><button type="button">${legendOpen ? 'Show fewer' : `Show all ${named.length} models (+${hidden})`}</button></li>`
+          ? `<li class="legend-toggle"><button type="button">${legendOpen ? 'Show fewer' : `Show all ${named.length} ${itemLabel} (+${hidden})`}</button></li>`
           : '');
       $(legendId).querySelector('.legend-toggle button')?.addEventListener('click', () => { legendOpen = !legendOpen; drawLegend(); });
     }
@@ -306,13 +310,48 @@
     $('range-tabs').hidden = true;
   }
 
+  // ---- Market share by model author (Absolute | Percentage), colored like openrouter.ai
+  const ms = data.marketShare;
+  if (ms) {
+    const msWeekly = ms.granularity === 'week';
+    let msMode = 'pct';
+    try { msMode = localStorage.getItem('market-share-mode') === 'abs' ? 'abs' : 'pct'; } catch { /* storage unavailable */ }
+    $('ms-sub').textContent = `Share of spend by model author per ${msWeekly ? 'week' : 'day'}, ${long(ms.labels[0])} – ${long(ms.labels.at(-1))} (UTC)`;
+    const drawMs = stackedChart({
+      canvasId: 'ms-chart',
+      legendId: 'ms-legend',
+      labels: ms.labels,
+      series: withColors(ms.series),
+      itemLabel: 'authors',
+      percent: () => msMode === 'pct',
+      title: (i) => (msWeekly
+        ? `Week of ${long(ms.labels[i])}`
+        : fmtDate(ms.labels[i], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })),
+    });
+    redraw.push(drawMs);
+    const syncTabs = () => document.querySelectorAll('#ms-tabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.mode === msMode)));
+    syncTabs();
+    $('ms-tabs').addEventListener('click', (ev) => {
+      const b = ev.target.closest('button[data-mode]');
+      if (!b || b.dataset.mode === msMode) return;
+      msMode = b.dataset.mode;
+      try { localStorage.setItem('market-share-mode', msMode); } catch { /* ignore */ }
+      syncTabs();
+      hideTip();
+      drawMs();
+    });
+  } else {
+    $('market-share').hidden = true;
+  }
+
   function fmtSigned(x) { return (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(1); }
 
   // ---------------------------------------------------------------- leaderboard
 
+  const COLLAPSED = 10;
   const PAGE = 20;
   let period = 'week';
-  let shown = PAGE;
+  let shown = COLLAPSED;
   try { period = localStorage.getItem('lb-period') || period; } catch { /* storage unavailable */ }
 
   function changeCell(r) {
@@ -377,7 +416,7 @@
     const b = e.target.closest('button[data-period]');
     if (!b) return;
     period = b.dataset.period;
-    shown = PAGE;
+    shown = COLLAPSED;
     try { localStorage.setItem('lb-period', period); } catch { /* ignore */ }
     drawLeaderboard();
   });

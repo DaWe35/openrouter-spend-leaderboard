@@ -222,6 +222,8 @@ function buildOutput(h) {
   return {
     updatedAt: h.updatedAt,
     chart: buildChart(h, dates),
+    // Market share by model author, like openrouter.ai's (top 9 per bar + Others).
+    marketShare: buildChart(h, dates, { group: authorOf, topN: 9, meta: authorMeta(h), othersLabel: 'authors' }),
     leaderboard: { day, week, month, trending },
   };
 }
@@ -247,7 +249,28 @@ function row(key, v, total, change, prevUsd) {
   };
 }
 
-function buildChart(h, dates) {
+function modelMeta(h) {
+  return (key) => ({
+    name: h.models[key]?.name ?? key,
+    author: h.models[key]?.author ?? key.split('/')[0],
+    slug: h.models[key]?.slug ?? key.split(':')[0],
+  });
+}
+
+// Model author key = permaslug prefix ("anthropic/claude-…" → "anthropic").
+function authorOf(key) { return key.split('/')[0]; }
+function authorMeta(h) {
+  const names = new Map();
+  for (const [key, m] of Object.entries(h.models)) if (m.author && !names.has(authorOf(key))) names.set(authorOf(key), m.author);
+  return (a) => ({ name: names.get(a) ?? a, author: names.get(a) ?? a, slug: a });
+}
+
+/**
+ * Stacked-bar data: each bar shows its own top `topN` groups by spend plus "Others".
+ * Series are listed in order of first appearance (each bar: top N descending, then
+ * "Others"), like openrouter.ai; the page stacks and colors them in that order.
+ */
+function buildChart(h, dates, { group = (k) => k, topN = CHART_TOP_N, meta = modelMeta(h), othersLabel = 'models' } = {}) {
   const chartDates = dates.slice(-365);
   const weekly = chartDates.length > 70;
   const bucketOf = weekly ? weekStart : (d) => d;
@@ -260,14 +283,12 @@ function buildChart(h, dates) {
   for (const d of chartDates) {
     const i = idx.get(bucketOf(d));
     for (const [key, t] of Object.entries(h.days[d])) {
-      let arr = perModel.get(key);
-      if (!arr) perModel.set(key, (arr = labels.map(() => 0)));
+      const g = group(key);
+      let arr = perModel.get(g);
+      if (!arr) perModel.set(g, (arr = labels.map(() => 0)));
       arr[i] += t[IN] + t[OUT];
     }
   }
-  // Same structure as openrouter.ai's Top Models chart: each bar shows its own top 9 models
-  // (by spend here) plus "Others". Series are listed in order of first appearance (each bar:
-  // top 9 descending, then "Others"); the page stacks and colors them in that order.
   const order = [];
   const seen = new Set();
   const values = new Map(); // key -> values[]
@@ -277,9 +298,9 @@ function buildChart(h, dates) {
   };
   labels.forEach((_, i) => {
     const ranked = [...perModel].map(([k, v]) => [k, v[i]]).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
-    const keys = [...ranked.slice(0, CHART_TOP_N).map(([k]) => k), 'Others'];
-    for (const [k, v] of ranked.slice(0, CHART_TOP_N)) add(k, i, v);
-    add('Others', i, sum(ranked.slice(CHART_TOP_N).map(([, v]) => v)));
+    const keys = [...ranked.slice(0, topN).map(([k]) => k), 'Others'];
+    for (const [k, v] of ranked.slice(0, topN)) add(k, i, v);
+    add('Others', i, sum(ranked.slice(topN).map(([, v]) => v)));
     for (const k of keys) if (!seen.has(k)) { seen.add(k); order.push(k); }
   });
 
@@ -291,9 +312,9 @@ function buildChart(h, dates) {
     total,
     series: order.map((key) => ({
       key,
-      name: key === 'Others' ? 'Others' : h.models[key]?.name ?? key,
-      author: key === 'Others' ? `All models outside each bar's top ${CHART_TOP_N} by spend` : h.models[key]?.author ?? key.split('/')[0],
-      slug: key === 'Others' ? '' : h.models[key]?.slug ?? key.split(':')[0],
+      ...(key === 'Others'
+        ? { name: 'Others', author: `All ${othersLabel} outside each bar's top ${topN} by spend`, slug: '' }
+        : meta(key)),
       total: round2(sum(values.get(key))),
       values: values.get(key).map(round2),
     })),
